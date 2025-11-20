@@ -1,0 +1,95 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: manan-next-concept-test
+spec:
+  schedulerName: volcano
+  minAvailable: 1         # match replicas
+  queue: default
+  plugins:
+    ssh: []
+    svc: []
+    env: []
+  tasks:
+    - name: node
+      replicas: 1         # number of nodes you want
+      policies:
+        - event: TaskCompleted
+          action: CompleteJob
+      template:
+        spec:
+          imagePullSecrets:
+            - name: acr-pull
+          hostNetwork: true
+          dnsPolicy: ClusterFirstWithHostNet
+          restartPolicy: OnFailure
+          volumes:
+            - name: ssh-script
+              configMap:
+                name: ssh-setup
+            - name: repo
+              hostPath:
+                path: /home/msrf/manantomar/nano-gpt
+                type: Directory
+            - name: data
+              hostPath:
+                path: /home/msrf/manantomar/nanoVLM/data/
+                type: Directory
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 8Gi
+          containers:
+            - name: node
+              image: nvcr.io/nvidia/pytorch:25.02-py3
+              securityContext:
+                privileged: true
+              resources:
+                requests:
+                  cpu: "128"
+                  memory: "1600Gi"
+                limits:
+                  cpu: "128"
+                  nvidia.com/gpu: "8"
+                  memory: "1600Gi"
+              env:
+                - name: WANDB_HOST
+                  value: "https://wandb.ai"
+                - name: WANDB_API_KEY
+                  value: "30457e819f894e4f0357c008657cb5529b1bc6c3"
+                - name: GPUS_PER_NODE
+                  value: "8"
+                - name: MASTER_PORT
+                  value: "29500"
+              command:
+                - /bin/bash
+                - -lc
+                - |
+                  set -euo pipefail
+                  cp /ssh-setup.sh /ssh-setup2.sh
+                  chmod +x /ssh-setup2.sh
+                  /ssh-setup2.sh
+
+                  nvidia-smi
+
+                  pip install torch numpy torchvision pillow datasets huggingface-hub transformers wandb einops
+                  # Optional: for lmms-eval integration you have to install it from source, see section 'Evaluation with lmms-eval'
+
+                  echo "Package installation completed!"
+                  echo "===================="
+
+                  echo "Executing training command..."
+                  ./run_train_nano.sh
+                  
+                  echo "Done"
+              volumeMounts:
+                - name: ssh-script
+                  mountPath: /ssh-setup.sh
+                  subPath: ssh-setup.sh
+                - name: repo
+                  mountPath: /mnt/home       # repo root inside container
+                - name: data
+                  mountPath: /mnt/data/fineweb100B
+                - name: dshm
+                  mountPath: /dev/shm
+              workingDir: /mnt/home
